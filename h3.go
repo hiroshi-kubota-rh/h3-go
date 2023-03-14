@@ -97,8 +97,9 @@ type (
 	}
 
 	// LinkedGeoPolygon is a linked-list of GeoPolygons.
-	// TODO: not implemented.
-	LinkedGeoPolygon struct{}
+	LinkedGeoPolygon struct {
+		GeoPolygons []GeoPolygon
+	}
 )
 
 func NewLatLng(lat, lng float64) LatLng {
@@ -245,8 +246,48 @@ func (p GeoPolygon) Cells(resolution int) []Cell {
 	return PolygonToCells(p, resolution)
 }
 
-func CellsToMultiPolygon(cells []Cell) *LinkedGeoPolygon {
-	panic("not implemented")
+func CellsToMultiPolygon(in []Cell) *LinkedGeoPolygon {
+	out := (*C.LinkedGeoPolygon)(C.malloc(C.size_t(C.sizeof_LinkedGeoPolygon)))
+	cin := cellsToC(in)
+	csz := C.int(len(in))
+	C.cellsToLinkedMultiPolygon(&cin[0], csz, out) //別途error処理入れて方がいい？
+	defer C.destroyLinkedMultiPolygon(out)
+	return linkedGePolygonFromC(out)
+}
+
+func linkedGePolygonFromC(cin *C.LinkedGeoPolygon) *LinkedGeoPolygon {
+	var clgl *C.LinkedGeoLoop
+	var clll *C.LinkedLatLng
+
+	if cin == nil {
+		return nil
+	}
+	out := &LinkedGeoPolygon{}
+	for cin != nil {
+		clgl = cin.first
+		gp := GeoPolygon{}
+		for clgl != nil {
+			clll = clgl.first
+			var gl []LatLng
+			for clll != nil {
+				ll := LatLng{
+					Lat: float64(clll.vertex.lat),
+					Lng: float64(clll.vertex.lng),
+				}
+				gl = append(gl, ll)
+				clll = clll.next
+			}
+			if clgl == cin.first {
+				gp.GeoLoop = gl
+			} else {
+				gp.Holes = append(gp.Holes, gl)
+			}
+			clgl = clgl.next
+		}
+		out.GeoPolygons = append(out.GeoPolygons, gp)
+		cin = cin.next
+	}
+	return out
 }
 
 // PointDistRads returns the "great circle" or "haversine" distance between
